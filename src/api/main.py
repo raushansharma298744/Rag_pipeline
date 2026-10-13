@@ -28,6 +28,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/")
+async def root():
+    """Root endpoint verifying API is alive."""
+    return {
+        "status": "online",
+        "service": "IntelliRAG API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
 # Global pipeline instance
 pipeline: RAGPipeline = None
 
