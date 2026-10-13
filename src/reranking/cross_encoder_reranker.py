@@ -8,8 +8,18 @@ class CrossEncoderReranker:
     """Re-rank using cross-encoder model."""
     
     def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
-        from sentence_transformers import CrossEncoder
-        self.model = CrossEncoder(model_name)
+        self.model_name = model_name
+        self._model = None
+    
+    @property
+    def model(self):
+        """Lazy load CrossEncoder model on first call to save memory at startup."""
+        if self._model is None:
+            import torch
+            torch.set_num_threads(1)
+            from sentence_transformers import CrossEncoder
+            self._model = CrossEncoder(self.model_name, device="cpu")
+        return self._model
     
     def rerank(
         self,

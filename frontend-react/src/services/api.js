@@ -1,13 +1,24 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+export const getAPIBase = () => {
+  return (
+    localStorage.getItem('CUSTOM_API_URL') ||
+    import.meta.env.VITE_API_URL ||
+    'http://localhost:8000'
+  ).replace(/\/+$/, '');
+};
 
 const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: getAPIBase(),
   headers: {
     'Content-Type': 'application/json',
   },
   timeout: 60000,
+});
+
+api.interceptors.request.use((config) => {
+  config.baseURL = getAPIBase();
+  return config;
 });
 
 export const queryAPI = async (query, options = {}) => {
@@ -23,8 +34,9 @@ export const queryAPI = async (query, options = {}) => {
 
 export const queryStreamAPI = async (query, options = {}, onToken) => {
   const { top_k = 5, use_reranker = true, filters = null } = options;
+  const apiBase = getAPIBase();
   
-  const response = await fetch(`${API_BASE}/query/stream`, {
+  const response = await fetch(`${apiBase}/query/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, top_k, use_reranker, filters }),

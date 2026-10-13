@@ -29,7 +29,7 @@ app.add_middleware(
 )
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     """Root endpoint verifying API is alive."""
     return {
@@ -109,6 +109,13 @@ def _initialize_pipeline_sync():
     global pipeline, pipeline_init_error
     try:
         print("[Startup] Background ML model initialization started...")
+        import gc
+        try:
+            import torch
+            torch.set_num_threads(1)
+        except Exception:
+            pass
+
         config = RAGConfig()
         embedding_model = SentenceTransformerEmbedding(config.embedding_model)
         vector_store = FAISSVectorStore(dimension=384)
@@ -138,6 +145,7 @@ def _initialize_pipeline_sync():
         else:
             print(f"[Startup] Directory {data_dir} does not exist, skipping auto-ingest")
 
+        gc.collect()
         pipeline = pipe
         print("[Startup] RAG Pipeline initialized successfully and ready for queries!")
     except Exception as e:
@@ -517,7 +525,7 @@ async def rerank_only(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.api_route("/health", methods=["GET", "HEAD"], response_model=HealthResponse)
 async def health():
     """Health check with optional stats."""
     if pipeline is None:
