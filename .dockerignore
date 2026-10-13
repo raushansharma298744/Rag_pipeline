@@ -1,0 +1,13 @@
+frontend-react/node_modules
+frontend-react/dist
+myenv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.env
+logs/
+chroma_db/

@@ -1,0 +1,31 @@
+services:
+  # Backend FastAPI Web Service
+  - type: web
+    name: rag-pipeline-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: qwen/qwen3.8-27b
+      - key: HF_TOKEN
+        sync: false
+
+  # Frontend React Static Site (100% Free & Never Sleeps)
+  - type: web
+    name: rag-pipeline-frontend
+    runtime: static
+    rootDir: frontend-react
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    plan: free
+    envVars:
+      - key: VITE_API_URL
+        sync: false

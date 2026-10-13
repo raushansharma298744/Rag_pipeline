@@ -1,0 +1,19 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files and install dependencies cleanly inside Linux container
+COPY frontend-react/package*.json ./
+RUN npm install
+
+# Copy frontend source code and configs (excluding node_modules)
+COPY frontend-react/index.html ./
+COPY frontend-react/vite.config.js ./
+COPY frontend-react/postcss.config.js ./
+COPY frontend-react/.env ./
+COPY frontend-react/src/ ./src/
+COPY frontend-react/public/ ./public/
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

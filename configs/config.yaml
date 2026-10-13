@@ -1,0 +1,64 @@
+# RAG Pipeline Configuration
+
+# Embedding Settings
+embedding:
+  model: "sentence-transformers/all-MiniLM-L6-v2"
+  batch_size: 32
+  device: "auto"  # auto, cpu, cuda
+
+# Chunking Settings
+chunking:
+  chunk_size: 512
+  chunk_overlap: 50
+  separator: "\n\n"
+
+# Retrieval Settings
+retrieval:
+  top_k: 10
+  score_threshold: 0.0
+  use_hybrid: true
+  dense_weight: 0.7
+  sparse_weight: 0.3
+
+# Re-ranking Settings
+reranking:
+  enabled: true
+  model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  top_k: 5
+
+# Generation Settings
+generation:
+  model: "gpt-3.5-turbo"
+  max_tokens: 512
+  temperature: 0.1
+  max_context_length: 4000
+  prompt_template: "default"
+
+# Vector Store Settings
+vectorstore:
+  type: "faiss"  # faiss, chroma, qdrant, pinecone
+  faiss:
+    index_type: "IVF"  # FLAT, IVF, HNSW
+  chroma:
+    persist_directory: "./chroma_db"
+    collection_name: "rag_collection"
+  qdrant:
+    host: "localhost"
+    port: 6333
+    collection_name: "rag_collection"
+  pinecone:
+    index_name: "rag-index"
+    cloud: "aws"
+    region: "us-east-1"
+
+# API Settings
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+
+# Logging
+logging:
+  level: "INFO"
+  file: "./logs/rag.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
