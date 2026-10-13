@@ -5,6 +5,7 @@ pyyaml>=6.0
 tqdm>=4.65.0
 
 # Embedding models
+fastembed>=0.3.0
 sentence-transformers>=2.2.0
 transformers>=4.30.0
 torch>=2.0.0

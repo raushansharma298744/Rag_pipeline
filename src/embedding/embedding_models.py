@@ -42,6 +42,27 @@ class SentenceTransformerEmbedding(EmbeddingModel):
         return self.model.encode([query], convert_to_numpy=True)[0]
 
 
+class FastEmbedding(EmbeddingModel):
+    """Ultra-low memory ONNX embedding model (<230MB RAM) designed for Render 512MB limit."""
+    
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
+        self.model_name = model_name
+        self._model = None
+        
+    @property
+    def model(self):
+        if self._model is None:
+            from fastembed import TextEmbedding
+            self._model = TextEmbedding(model_name=self.model_name)
+        return self._model
+        
+    def embed(self, texts: List[str]) -> np.ndarray:
+        return np.array(list(self.model.embed(texts)))
+        
+    def embed_query(self, query: str) -> np.ndarray:
+        return np.array(list(self.model.embed([query]))[0])
+
+
 class OpenAIEmbedding(EmbeddingModel):
     """OpenAI embedding model."""
     

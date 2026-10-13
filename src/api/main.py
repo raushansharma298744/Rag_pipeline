@@ -121,7 +121,14 @@ def _initialize_pipeline_sync():
             pass
 
         config = RAGConfig()
-        embedding_model = SentenceTransformerEmbedding(config.embedding_model)
+        try:
+            import fastembed
+            from src.embedding.embedding_models import FastEmbedding
+            embedding_model = FastEmbedding()
+            print("[Startup] Using ultra-low memory FastEmbed engine (<230MB RAM)")
+        except ImportError:
+            embedding_model = SentenceTransformerEmbedding(config.embedding_model)
+            print("[Startup] Using SentenceTransformer embedding engine")
         vector_store = FAISSVectorStore(dimension=384)
 
         # Real LLM client from environment
