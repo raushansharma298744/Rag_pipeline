@@ -19,13 +19,21 @@ class EmbeddingModel(ABC):
 
 
 class SentenceTransformerEmbedding(EmbeddingModel):
-    """SentenceTransformer-based embedding model."""
+    """SentenceTransformer-based embedding model with instant startup and lazy loading."""
     
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        import torch
-        torch.set_num_threads(1)
-        from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(model_name, device="cpu")
+        self.model_name = model_name
+        self._model = None
+    
+    @property
+    def model(self):
+        """Lazy load SentenceTransformer weights on first use to ensure instant startup within 512MB RAM."""
+        if self._model is None:
+            import torch
+            torch.set_num_threads(1)
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer(self.model_name, device="cpu")
+        return self._model
     
     def embed(self, texts: List[str]) -> np.ndarray:
         return self.model.encode(texts, batch_size=8, convert_to_numpy=True, show_progress_bar=False)
