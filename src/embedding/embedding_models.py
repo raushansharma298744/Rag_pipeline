@@ -28,7 +28,7 @@ class SentenceTransformerEmbedding(EmbeddingModel):
         self.model = SentenceTransformer(model_name, device="cpu")
     
     def embed(self, texts: List[str]) -> np.ndarray:
-        return self.model.encode(texts, convert_to_numpy=True)
+        return self.model.encode(texts, batch_size=8, convert_to_numpy=True, show_progress_bar=False)
     
     def embed_query(self, query: str) -> np.ndarray:
         return self.model.encode([query], convert_to_numpy=True)[0]

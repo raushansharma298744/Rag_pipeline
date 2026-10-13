@@ -133,17 +133,16 @@ def _initialize_pipeline_sync():
             reranker=reranker
         )
 
-        # Auto-ingest documents from data/raw
+        # Auto-ingest documents from data/raw only if explicitly requested
+        auto_ingest = os.getenv("AUTO_INGEST_ON_STARTUP", "false").lower() == "true"
         data_dir = os.getenv("RAG_DATA_DIR", "./data/raw")
-        if os.path.exists(data_dir):
+        if auto_ingest and os.path.exists(data_dir):
             docs = load_documents_from_dir(data_dir)
             if docs:
                 pipe.add_documents(docs)
                 print(f"[Startup] Auto-ingested {len(docs)} documents from {data_dir}")
-            else:
-                print(f"[Startup] No documents found in {data_dir}, ready for manual ingestion")
         else:
-            print(f"[Startup] Directory {data_dir} does not exist, skipping auto-ingest")
+            print("[Startup] Fast ready mode: pipeline ready for manual upload via UI")
 
         gc.collect()
         pipeline = pipe
@@ -528,6 +527,8 @@ async def rerank_only(
 @app.api_route("/health", methods=["GET", "HEAD"], response_model=HealthResponse)
 async def health():
     """Health check with optional stats."""
+    if pipeline_init_error:
+        return HealthResponse(status="error", pipeline_ready=False)
     if pipeline is None:
         return HealthResponse(status="initializing", pipeline_ready=False)
     
