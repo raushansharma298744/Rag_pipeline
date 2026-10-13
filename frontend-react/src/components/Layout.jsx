@@ -32,7 +32,7 @@ export default function Layout() {
         const res = await healthCheckAPI();
         if (isMounted) {
           setHealth({
-            status: res.status === 'healthy' ? 'online' : 'unhealthy',
+            status: res.status === 'healthy' ? 'online' : res.status === 'initializing' ? 'checking' : 'unhealthy',
             total_chunks: res.stats?.total_chunks ?? 0,
           });
         }
@@ -98,7 +98,7 @@ export default function Layout() {
                   ></span>
                 </span>
                 <span className="text-xs font-semibold text-slate-700 capitalize">
-                  {health.status === 'online' ? 'System Online' : health.status === 'checking' ? 'Connecting...' : 'System Offline'}
+                  {health.status === 'online' ? 'System Online' : health.status === 'checking' ? 'Initializing Pipeline...' : 'System Offline'}
                 </span>
               </div>
               <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 font-bold border border-emerald-200/60">
