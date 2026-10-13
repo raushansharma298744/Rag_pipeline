@@ -17,6 +17,10 @@ services:
         value: qwen/qwen3.8-27b
       - key: HF_TOKEN
         sync: false
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: TOKENIZERS_PARALLELISM
+        value: "false"
 
   # Frontend React Static Site (100% Free & Never Sleeps)
   - type: web

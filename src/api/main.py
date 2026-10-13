@@ -86,46 +86,97 @@ class HealthResponse(BaseModel):
     stats: Optional[StatsResponse] = None
 
 
+# Global pipeline state
+pipeline: Optional[RAGPipeline] = None
+is_pipeline_initializing: bool = False
+pipeline_init_error: Optional[str] = None
+
+
+def _initialize_pipeline_sync():
+    """Worker function executed in a background thread to download/load ML models."""
+    global pipeline, pipeline_init_error
+    try:
+        print("[Startup] Background ML model initialization started...")
+        config = RAGConfig()
+        embedding_model = SentenceTransformerEmbedding(config.embedding_model)
+        vector_store = FAISSVectorStore(dimension=384)
+
+        # Real LLM client from environment
+        llm_client = get_llm_client()
+        generator = Generator(llm_client)
+        reranker = CrossEncoderReranker(config.reranker_model)
+
+        pipe = RAGPipeline(
+            config=config,
+            embedding_model=embedding_model,
+            vector_store=vector_store,
+            generator=generator,
+            reranker=reranker
+        )
+
+        # Auto-ingest documents from data/raw
+        data_dir = os.getenv("RAG_DATA_DIR", "./data/raw")
+        if os.path.exists(data_dir):
+            docs = load_documents_from_dir(data_dir)
+            if docs:
+                pipe.add_documents(docs)
+                print(f"[Startup] Auto-ingested {len(docs)} documents from {data_dir}")
+            else:
+                print(f"[Startup] No documents found in {data_dir}, ready for manual ingestion")
+        else:
+            print(f"[Startup] Directory {data_dir} does not exist, skipping auto-ingest")
+
+        pipeline = pipe
+        print("[Startup] RAG Pipeline initialized successfully and ready for queries!")
+    except Exception as e:
+        import traceback
+        pipeline_init_error = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"[Startup ERROR] Pipeline initialization failed: {pipeline_init_error}")
+
+
+async def init_pipeline_task():
+    global is_pipeline_initializing
+    if is_pipeline_initializing or pipeline is not None:
+        return
+    is_pipeline_initializing = True
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _initialize_pipeline_sync)
+    is_pipeline_initializing = False
+
+
 @app.on_event("startup")
 async def startup():
-    """Initialize pipeline on startup and auto-ingest documents."""
-    global pipeline
-    
-    config = RAGConfig()
-    embedding_model = SentenceTransformerEmbedding(config.embedding_model)
-    vector_store = FAISSVectorStore(dimension=384)
-    
-    # Real LLM client from environment
-    llm_client = get_llm_client()
-    generator = Generator(llm_client)
-    reranker = CrossEncoderReranker(config.reranker_model)
-    
-    pipeline = RAGPipeline(
-        config=config,
-        embedding_model=embedding_model,
-        vector_store=vector_store,
-        generator=generator,
-        reranker=reranker
-    )
-    
-    # Auto-ingest documents from data/raw
-    data_dir = os.getenv("RAG_DATA_DIR", "./data/raw")
-    docs = load_documents_from_dir(data_dir)
-    if docs:
-        pipeline.add_documents(docs)
-        print(f"Auto-ingested {len(docs)} documents from {data_dir}")
-    else:
-        print(f"No documents found in {data_dir}, ready for manual ingestion")
+    """Fast non-blocking startup so Uvicorn binds port immediately for Render."""
+    print("[Startup] FastAPI started. Launching pipeline initialization in background thread...")
+    asyncio.create_task(init_pipeline_task())
+    print("[Startup] Fast startup complete. HTTP port binding is active immediately.")
+
+
+async def get_ready_pipeline(timeout: float = 45.0) -> RAGPipeline:
+    """Ensure pipeline is ready before serving requests that require it."""
+    global pipeline, pipeline_init_error
+    if pipeline is not None:
+        return pipeline
+    if pipeline_init_error:
+        raise HTTPException(status_code=500, detail=f"Pipeline initialization error: {pipeline_init_error}")
+
+    start_time = asyncio.get_event_loop().time()
+    while pipeline is None and is_pipeline_initializing:
+        if asyncio.get_event_loop().time() - start_time > timeout:
+            raise HTTPException(status_code=503, detail="Pipeline is still downloading/loading models. Please retry in a few seconds.")
+        await asyncio.sleep(0.5)
+
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="Pipeline is initializing. Please retry in a few seconds.")
+    return pipeline
 
 
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
     """Query the RAG pipeline."""
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
-    
+    pipe = await get_ready_pipeline()
     try:
-        result = pipeline.query(
+        result = pipe.query(
             query=request.query,
             top_k=request.top_k,
             use_reranker=request.use_reranker,
@@ -153,23 +204,22 @@ async def query(request: QueryRequest):
 @app.post("/query/stream")
 async def query_stream(request: QueryRequest):
     """Stream query response token by token."""
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    pipe = await get_ready_pipeline()
     
     async def generate_stream() -> AsyncGenerator[str, None]:
         try:
-            top_k = request.top_k or pipeline.config.top_k_retrieval
-            use_reranker = request.use_reranker if request.use_reranker is not None else pipeline.config.use_reranker
+            top_k = request.top_k or pipe.config.top_k_retrieval
+            use_reranker = request.use_reranker if request.use_reranker is not None else pipe.config.use_reranker
             
-            if pipeline.config.use_hybrid and pipeline.hybrid_retriever:
-                retrieved = pipeline.hybrid_retriever.retrieve(request.query, top_k, pipeline.config.score_threshold)
+            if pipe.config.use_hybrid and pipe.hybrid_retriever:
+                retrieved = pipe.hybrid_retriever.retrieve(request.query, top_k, pipe.config.score_threshold)
             else:
-                retrieved = pipeline.vector_retriever.retrieve(request.query, top_k, pipeline.config.score_threshold, request.filters)
+                retrieved = pipe.vector_retriever.retrieve(request.query, top_k, pipe.config.score_threshold, request.filters)
             
-            if use_reranker and pipeline.reranker and retrieved:
-                retrieved = pipeline.reranker.rerank(request.query, retrieved, pipeline.config.top_k_rerank)
+            if use_reranker and pipe.reranker and retrieved:
+                retrieved = pipe.reranker.rerank(request.query, retrieved, pipe.config.top_k_rerank)
             
-            for token in pipeline.generator.generate_stream(request.query, retrieved):
+            for token in pipe.generator.generate_stream(request.query, retrieved):
                 yield f"data: {json.dumps({'token': token})}\n\n"
             
             yield f"data: {json.dumps({'done': True})}\n\n"
@@ -182,13 +232,12 @@ async def query_stream(request: QueryRequest):
 @app.post("/query/batch", response_model=BatchQueryResponse)
 async def query_batch(request: BatchQueryRequest):
     """Process multiple queries at once."""
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    pipe = await get_ready_pipeline()
     
     try:
         results = []
         for query_text in request.queries:
-            result = pipeline.query(
+            result = pipe.query(
                 query=query_text,
                 top_k=request.top_k,
                 use_reranker=request.use_reranker
@@ -216,11 +265,10 @@ async def query_batch(request: BatchQueryRequest):
 @app.post("/documents")
 async def add_documents(request: DocumentRequest):
     """Add documents to the pipeline."""
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    pipe = await get_ready_pipeline()
     
     try:
-        pipeline.add_documents(request.documents)
+        pipe.add_documents(request.documents)
         return {"status": "success", "count": len(request.documents)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -229,8 +277,7 @@ async def add_documents(request: DocumentRequest):
 @app.post("/documents/upload")
 async def upload_documents(files: List[UploadFile] = File(...)):
     """Upload and ingest documents (PDF, TXT, MD, JSON, JSONL)."""
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    pipe = await get_ready_pipeline()
     
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
@@ -246,7 +293,6 @@ async def upload_documents(files: List[UploadFile] = File(...)):
         suffix = os.path.splitext(filename)[1].lower()
         contents = await upload.read()
 
-        # Save a copy in data_dir so files are persisted
         save_path = os.path.join(data_dir, filename)
         try:
             with open(save_path, "wb") as f:
@@ -293,7 +339,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
     if not extracted_docs:
         raise HTTPException(status_code=400, detail="No valid text could be extracted from uploaded files")
 
-    pipeline.add_documents(extracted_docs)
+    pipe.add_documents(extracted_docs)
     return {
         "status": "success",
         "count": len(extracted_docs),
@@ -306,7 +352,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
 async def list_documents(limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
     """List indexed documents with pagination."""
     if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+        return {"documents": [], "total": 0, "limit": limit, "offset": offset}
     
     try:
         docs = pipeline.vector_store.documents
@@ -333,12 +379,11 @@ async def list_documents(limit: int = Query(100, ge=1, le=1000), offset: int = Q
 @app.delete("/documents")
 async def delete_documents(request: DocumentDeleteRequest):
     """Delete documents by IDs."""
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    pipe = await get_ready_pipeline()
     
     try:
-        if hasattr(pipeline.vector_store, 'delete'):
-            pipeline.vector_store.delete(request.ids)
+        if hasattr(pipe.vector_store, 'delete'):
+            pipe.vector_store.delete(request.ids)
             return {"status": "success", "deleted": len(request.ids)}
         else:
             raise HTTPException(status_code=501, detail="Delete not supported by this vector store")
@@ -350,7 +395,13 @@ async def delete_documents(request: DocumentDeleteRequest):
 async def get_stats():
     """Get pipeline statistics."""
     if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+        return StatsResponse(
+            total_documents=0,
+            total_chunks=0,
+            embedding_dimension=384,
+            index_type="FAISS",
+            config={"status": "initializing"}
+        )
     
     try:
         return StatsResponse(
@@ -376,7 +427,7 @@ async def get_stats():
 async def get_config():
     """Get current pipeline configuration."""
     if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+        return {"status": "initializing"}
     
     return {
         "top_k_retrieval": pipeline.config.top_k_retrieval,
@@ -394,20 +445,19 @@ async def get_config():
 @app.patch("/config")
 async def update_config(request: ConfigUpdateRequest):
     """Update pipeline configuration at runtime."""
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline not initialized")
+    pipe = await get_ready_pipeline()
     
     try:
         if request.top_k_retrieval is not None:
-            pipeline.config.top_k_retrieval = request.top_k_retrieval
+            pipe.config.top_k_retrieval = request.top_k_retrieval
         if request.top_k_rerank is not None:
-            pipeline.config.top_k_rerank = request.top_k_rerank
+            pipe.config.top_k_rerank = request.top_k_rerank
         if request.score_threshold is not None:
-            pipeline.config.score_threshold = request.score_threshold
+            pipe.config.score_threshold = request.score_threshold
         if request.use_hybrid is not None:
-            pipeline.config.use_hybrid = request.use_hybrid
+            pipe.config.use_hybrid = request.use_hybrid
         if request.use_reranker is not None:
-            pipeline.config.use_reranker = request.use_reranker
+            pipe.config.use_reranker = request.use_reranker
         
         return {"status": "success", "config": await get_config()}
     except Exception as e:
@@ -421,23 +471,24 @@ async def rerank_only(
     top_k: int = 5
 ):
     """Re-rank pre-retrieved candidates by IDs."""
-    if pipeline is None or pipeline.reranker is None:
-        raise HTTPException(status_code=503, detail="Pipeline or reranker not initialized")
+    pipe = await get_ready_pipeline()
+    if pipe.reranker is None:
+        raise HTTPException(status_code=503, detail="Reranker not initialized")
     
     try:
         candidates = []
         for cid in candidate_ids:
-            doc_idx = pipeline.vector_store.ids.index(cid) if cid in pipeline.vector_store.ids else -1
+            doc_idx = pipe.vector_store.ids.index(cid) if cid in pipe.vector_store.ids else -1
             if doc_idx >= 0:
-                from retrieval.vector_retriever import RetrievalResult
+                from src.retrieval.vector_retriever import RetrievalResult
                 candidates.append(RetrievalResult(
-                    content=pipeline.vector_store.documents[doc_idx],
+                    content=pipe.vector_store.documents[doc_idx],
                     score=0.0,
-                    metadata=pipeline.vector_store.metadata[doc_idx],
+                    metadata=pipe.vector_store.metadata[doc_idx],
                     chunk_id=cid
                 ))
         
-        reranked = pipeline.reranker.rerank(query, candidates, top_k)
+        reranked = pipe.reranker.rerank(query, candidates, top_k)
         
         return {
             "reranked": [
@@ -458,7 +509,7 @@ async def rerank_only(
 async def health():
     """Health check with optional stats."""
     if pipeline is None:
-        return HealthResponse(status="degraded", pipeline_ready=False)
+        return HealthResponse(status="initializing", pipeline_ready=False)
     
     try:
         stats = await get_stats()
@@ -468,4 +519,5 @@ async def health():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("src.api.main:app", host="0.0.0.0", port=port)
