@@ -53,14 +53,17 @@ class FastEmbedding(EmbeddingModel):
     def model(self):
         if self._model is None:
             from fastembed import TextEmbedding
-            self._model = TextEmbedding(model_name=self.model_name)
+            # Use 1 thread to minimize CPU & RAM spikes on single-core / 512MB instances
+            self._model = TextEmbedding(model_name=self.model_name, threads=1)
         return self._model
         
     def embed(self, texts: List[str]) -> np.ndarray:
-        return np.array(list(self.model.embed(texts)))
+        if not texts:
+            return np.empty((0, 384), dtype=np.float32)
+        return np.array(list(self.model.embed(texts, batch_size=8)))
         
     def embed_query(self, query: str) -> np.ndarray:
-        return np.array(list(self.model.embed([query]))[0])
+        return np.array(list(self.model.embed([query], batch_size=1))[0])
 
 
 class OpenAIEmbedding(EmbeddingModel):

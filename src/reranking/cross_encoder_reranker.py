@@ -5,20 +5,24 @@ from src.retrieval.vector_retriever import RetrievalResult
 
 
 class CrossEncoderReranker:
-    """Re-rank using cross-encoder model."""
+    """Re-rank using cross-encoder model with fallback if neural reranker is not installed."""
     
     def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
         self.model_name = model_name
         self._model = None
+        self._load_attempted = False
     
     @property
     def model(self):
-        """Lazy load CrossEncoder model on first call to save memory at startup."""
-        if self._model is None:
-            import torch
-            torch.set_num_threads(1)
-            from sentence_transformers import CrossEncoder
-            self._model = CrossEncoder(self.model_name, device="cpu")
+        """Lazy load CrossEncoder model on first call to save memory."""
+        if not self._load_attempted:
+            self._load_attempted = True
+            try:
+                from sentence_transformers import CrossEncoder
+                self._model = CrossEncoder(self.model_name, device="cpu")
+            except Exception as e:
+                print(f"[Reranker] CrossEncoder not loaded ({e}). Skipping neural rerank to preserve memory.")
+                self._model = None
         return self._model
     
     def rerank(
@@ -27,15 +31,20 @@ class CrossEncoderReranker:
         results: List[RetrievalResult],
         top_k: Optional[int] = None
     ) -> List[RetrievalResult]:
-        """Re-rank results using cross-encoder."""
-        pairs = [(query, result.content) for result in results]
-        scores = self.model.predict(pairs)
-        
-        for result, score in zip(results, scores):
-            result.score = float(score)
-        
-        results.sort(key=lambda x: x.score, reverse=True)
-        
+        """Re-rank results using cross-encoder if available, or return existing ranked results."""
+        if not results:
+            return []
+        if self.model is None:
+            return results[:top_k] if top_k else results
+        try:
+            pairs = [(query, result.content) for result in results]
+            scores = self.model.predict(pairs)
+            for result, score in zip(results, scores):
+                result.score = float(score)
+            results.sort(key=lambda x: x.score, reverse=True)
+        except Exception as e:
+            print(f"[Reranker] Fallback during reranking: {e}")
+            
         if top_k:
             return results[:top_k]
         return results

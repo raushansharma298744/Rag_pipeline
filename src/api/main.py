@@ -29,7 +29,7 @@ app.add_middleware(
 )
 
 
-@app.api_route("/", methods=["GET", "HEAD"])
+@app.get("/")
 async def root():
     """Root endpoint verifying API is alive."""
     return {
@@ -114,21 +114,22 @@ def _initialize_pipeline_sync():
     try:
         print("[Startup] Background ML model initialization started...")
         import gc
-        try:
-            import torch
-            torch.set_num_threads(1)
-        except Exception:
-            pass
 
         config = RAGConfig()
+        # On 512MB RAM instances, disable heavy cross-encoder reranker unless explicitly enabled
+        config.use_reranker = os.getenv("ENABLE_RERANKER", "false").lower() == "true"
+
         try:
-            import fastembed
             from src.embedding.embedding_models import FastEmbedding
             embedding_model = FastEmbedding()
-            print("[Startup] Using ultra-low memory FastEmbed engine (<230MB RAM)")
-        except ImportError:
+            print("[Startup] Pre-warming FastEmbed ONNX model in background...")
+            _ = embedding_model.embed_query("warmup")
+            print("[Startup] Using ultra-low memory FastEmbed engine (<230MB RAM) - ready!")
+        except Exception as embed_err:
+            print(f"[Startup Warning] FastEmbed failed ({embed_err}), falling back to SentenceTransformer...")
             embedding_model = SentenceTransformerEmbedding(config.embedding_model)
             print("[Startup] Using SentenceTransformer embedding engine")
+
         vector_store = FAISSVectorStore(dimension=384)
 
         # Real LLM client from environment
@@ -535,7 +536,7 @@ async def rerank_only(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.api_route("/health", methods=["GET", "HEAD"], response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse)
 async def health():
     """Health check with optional stats."""
     if pipeline_init_error:

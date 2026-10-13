@@ -4,24 +4,14 @@ pydantic>=2.0.0
 pyyaml>=6.0
 tqdm>=4.65.0
 
-# Embedding models
+# Ultra-low memory Embedding (ONNX runtime, <230MB RAM)
 fastembed>=0.3.0
-sentence-transformers>=2.2.0
-transformers>=4.30.0
-torch>=2.0.0
-accelerate>=0.20.0
 
 # Vector stores
 faiss-cpu>=1.7.4
-chromadb>=0.4.0
-qdrant-client>=1.7.0
-pinecone-client>=2.2.0
 
 # Retrieval
 rank-bm25>=0.2.2
-
-# Re-ranking (included in sentence-transformers)
-# cross-encoder functionality: from sentence_transformers import CrossEncoder
 
 # API
 fastapi>=0.100.0
@@ -29,13 +19,19 @@ uvicorn>=0.23.0
 python-multipart>=0.0.6
 pypdf>=4.0.0
 
-# Optional: ColBERT
-# colbert-ai>=0.2.0
-
-# LLM
+# LLM (Fast inference via Groq & OpenAI)
 openai>=1.0.0
 groq>=0.4.0
 python-dotenv>=1.0.0
+
+# Optional heavy ML (Commented out to keep RAM well within Render 512MB limit)
+# sentence-transformers>=2.2.0
+# transformers>=4.30.0
+# torch>=2.0.0
+# accelerate>=0.20.0
+# chromadb>=0.4.0
+# qdrant-client>=1.7.0
+# pinecone-client>=2.2.0
 
 # Development
 pytest>=7.4.0
