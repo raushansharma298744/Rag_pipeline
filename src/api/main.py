@@ -35,7 +35,10 @@ async def root():
     return {
         "status": "online",
         "service": "IntelliRAG API",
-        "version": "1.0.0",
+        "version": "1.0.2",
+        "pipeline_ready": pipeline is not None,
+        "is_initializing": is_pipeline_initializing,
+        "init_error": pipeline_init_error,
         "docs": "/docs",
         "health": "/health"
     }
@@ -96,6 +99,7 @@ class HealthResponse(BaseModel):
     status: str
     pipeline_ready: bool
     stats: Optional[StatsResponse] = None
+    error: Optional[str] = None
 
 
 # Global pipeline state
@@ -528,15 +532,15 @@ async def rerank_only(
 async def health():
     """Health check with optional stats."""
     if pipeline_init_error:
-        return HealthResponse(status="error", pipeline_ready=False)
+        return HealthResponse(status="error", pipeline_ready=False, error=pipeline_init_error)
     if pipeline is None:
         return HealthResponse(status="initializing", pipeline_ready=False)
     
     try:
         stats = await get_stats()
         return HealthResponse(status="healthy", pipeline_ready=True, stats=stats)
-    except:
-        return HealthResponse(status="healthy", pipeline_ready=True)
+    except Exception as e:
+        return HealthResponse(status="healthy", pipeline_ready=True, error=str(e))
 
 
 if __name__ == "__main__":
